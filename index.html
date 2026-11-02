@@ -19,7 +19,7 @@ nav button{background:none;color:var(--t);border:0;border-radius:0;margin:0}nav 
 <section id="add" class="on"><div class="card">
 <label>Date</label><input type="date" id="date">
 <label>To</label><input id="to" list="tol" placeholder="Paid to"><datalist id="tol"></datalist>
-<label>Category</label><input id="cat" list="catl" placeholder="Food, Travel…"><datalist id="catl"></datalist>
+<label>Category</label><select id="cat" onchange="catChg()"></select><input id="newcat" placeholder="New category name" style="display:none">
 <div class="row"><div><label>Amount</label><input type="number" id="amt" inputmode="decimal"></div>
 <div><label>Mode</label><select id="mode"><option>UPI</option><option>Cash</option><option>Card</option><option>Net Banking</option></select></div></div>
 <label>Split between (number of people incl. you)</label><input type="number" id="split" value="1" min="1">
@@ -54,18 +54,22 @@ const today=()=>new Date().toISOString().slice(0,10);
 $('split').oninput=()=>{const n=Math.max(1,+$('split').value||1)-1;const o=[...document.querySelectorAll('.nm')].map(x=>x.value);$('names').innerHTML=Array.from({length:n},(_,i)=>`<input class="nm" placeholder="Person ${i+1} name" value="${o[i]||''}">`).join('')};
 async function save(){
  const a=+$('amt').value;if(!a||!$('to').value)return alert('Enter To and Amount');
- const n=Math.max(1,+$('split').value||1),names=[...document.querySelectorAll('.nm')].map(x=>x.value.trim());
+ const cat=getCat();const n=Math.max(1,+$('split').value||1),names=[...document.querySelectorAll('.nm')].map(x=>x.value.trim());
  const each=a/n,shares=names.map((nm,i)=>({name:nm||'Person '+(i+1),amt:+each.toFixed(2),settled:false}));
- S.expenses.push({id:Date.now()+''+Math.random().toString(36).slice(2,5),date:$('date').value,to:$('to').value.trim(),cat:$('cat').value.trim()||'Other',amt:a,mode:$('mode').value,split:n,shares,bill:await shrink($('pb').files[0]),item:await shrink($('pi').files[0]),upd:Date.now()});
- await persist();['to','cat','amt','pb','pi'].forEach(i=>$(i).value='');$('split').value=1;$('split').oninput();alert('Saved ✔');
+ S.expenses.push({id:Date.now()+''+Math.random().toString(36).slice(2,5),date:$('date').value,to:$('to').value.trim(),cat,amt:a,mode:$('mode').value,split:n,shares,bill:await shrink($('pb').files[0]),item:await shrink($('pi').files[0]),upd:Date.now()});
+ await persist();['to','amt','pb','pi','newcat'].forEach(i=>$(i).value='');fillCats();$('split').value=1;$('split').oninput();alert('Saved ✔');
 }
+function fillCats(){const el=$('cat'),v=el.value;let u=[...new Set([...(S.cats||[]),...S.expenses.map(e=>e.cat)])].sort();if(!u.length)u=['Food','Travel','Shopping','Bills','Other'];
+ el.innerHTML=u.map(x=>`<option value="${x.replace(/"/g,'&quot;')}">${x}</option>`).join('')+'<option value="__new">➕ Add new category…</option>';el.value=(u.includes(v)||v=='__new')?v:u[0];catChg()}
+function catChg(){$('newcat').style.display=$('cat').value=='__new'?'block':'none'}
+function getCat(){let c=$('cat').value=='__new'?$('newcat').value.trim():$('cat').value;if(!c)c='Other';S.cats=S.cats||[];const m=[...S.cats,...S.expenses.map(e=>e.cat)].find(x=>x.toLowerCase()==c.toLowerCase());if(m)return m;S.cats.push(c);return c}
 function inRange(e){const p=$('fp').value,d=$('fd').value||today();if(p=='all')return 1;if(p=='day')return e.date==d;if(p=='month')return e.date.slice(0,7)==d.slice(0,7);
  const s=new Date(d);s.setDate(s.getDate()-((s.getDay()+6)%7));const en=new Date(s);en.setDate(s.getDate()+6);return e.date>=s.toISOString().slice(0,10)&&e.date<=en.toISOString().slice(0,10)}
 function opts(id,k,all){const el=$(id),v=el.value,u=[...new Set(S.expenses.map(e=>e[k]))].sort();el.innerHTML=`<option value="">${all}</option>`+u.map(x=>`<option>${x}</option>`).join('');el.value=v}
 const COL=['#0f766e','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#10b981','#ec4899','#64748b','#eab308'];
 function render(){
  opts('fc','cat','All categories');opts('ft','to','All recipients');opts('fm','mode','All modes');
- $('catl').innerHTML=[...new Set(S.expenses.map(e=>e.cat))].map(x=>`<option>${x}</option>`).join('');$('tol').innerHTML=[...new Set(S.expenses.map(e=>e.to))].map(x=>`<option>${x}</option>`).join('');
+ fillCats();$('tol').innerHTML=[...new Set(S.expenses.map(e=>e.to))].map(x=>`<option>${x}</option>`).join('');
  const f=S.expenses.filter(e=>inRange(e)&&(!$('fc').value||e.cat==$('fc').value)&&(!$('ft').value||e.to==$('ft').value)&&(!$('fm').value||e.mode==$('fm').value)).sort((a,b)=>b.date.localeCompare(a.date));
  $('tot').textContent='₹'+f.reduce((s,e)=>s+e.amt,0).toFixed(2);
  $('list').innerHTML=f.map(e=>`<div class="it"><div><b>${e.to}</b> · ${e.cat}<small>${e.date} · ${e.mode}${e.split>1?' · split '+e.split:''}</small>${e.bill?`<img class=th src="${e.bill}">`:''}${e.item?`<img class=th src="${e.item}">`:''}</div><div>₹${e.amt}<br><button class=d onclick="del('${e.id}')">✕</button></div></div>`).join('')||'No expenses';
