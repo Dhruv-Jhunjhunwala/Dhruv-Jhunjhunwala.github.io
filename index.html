@@ -1,0 +1,96 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="manifest" href="manifest.json"><meta name="theme-color" content="#0f766e"><title>Expenses</title>
+<style>
+:root{--p:#0f766e;--b:#f1f5f9;--c:#fff;--t:#0f172a}
+@media(prefers-color-scheme:dark){:root{--b:#0f172a;--c:#1e293b;--t:#e2e8f0}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui;background:var(--b);color:var(--t);padding-bottom:64px}
+header{background:var(--p);color:#fff;padding:14px 16px;font-size:18px;font-weight:600}
+section{display:none;padding:12px}section.on{display:block}
+.card{background:var(--c);border-radius:12px;padding:12px;margin-bottom:12px}
+input,select,button{width:100%;padding:10px;margin:4px 0;border-radius:8px;border:1px solid #94a3b8;background:var(--c);color:var(--t);font:inherit}
+button{background:var(--p);color:#fff;border:0;font-weight:600}button.s{background:#64748b;width:auto;padding:6px 10px}button.d{background:#dc2626;width:auto;padding:6px 10px}
+label{font-size:12px;opacity:.7}.row{display:flex;gap:8px}.row>*{flex:1}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--c);border-top:1px solid #94a3b8}
+nav button{background:none;color:var(--t);border:0;border-radius:0;margin:0}nav button.on{color:var(--p);border-top:3px solid var(--p)}
+.big{font-size:28px;font-weight:700}.it{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #94a3b844}
+.it small{opacity:.7;display:block}img.th{height:48px;border-radius:6px;margin-right:4px}canvas{width:100%;max-width:320px;display:block;margin:auto}
+</style></head><body>
+<header>💸 Expense Tracker</header>
+<section id="add" class="on"><div class="card">
+<label>Date</label><input type="date" id="date">
+<label>To</label><input id="to" list="tol" placeholder="Paid to"><datalist id="tol"></datalist>
+<label>Category</label><input id="cat" list="catl" placeholder="Food, Travel…"><datalist id="catl"></datalist>
+<div class="row"><div><label>Amount</label><input type="number" id="amt" inputmode="decimal"></div>
+<div><label>Mode</label><select id="mode"><option>UPI</option><option>Cash</option><option>Card</option><option>Net Banking</option></select></div></div>
+<label>Split between (number of people incl. you)</label><input type="number" id="split" value="1" min="1">
+<div id="names"></div>
+<label>Bill photo</label><input type="file" id="pb" accept="image/*" capture="environment">
+<label>Item photo</label><input type="file" id="pi" accept="image/*" capture="environment">
+<button onclick="save()">Add expense</button></div></section>
+
+<section id="dash"><div class="card"><div class="row"><select id="fp" onchange="render()"><option value="all">All time</option><option value="day">Day</option><option value="week">Week</option><option value="month">Month</option></select>
+<input type="date" id="fd" onchange="render()"></div>
+<div class="row"><select id="fc" onchange="render()"></select><select id="ft" onchange="render()"></select><select id="fm" onchange="render()"></select></div>
+<div>Total</div><div class="big" id="tot"></div></div>
+<div class="card"><b>This month by category</b><canvas id="pie" width="320" height="320"></canvas><div id="leg"></div></div>
+<div class="card" id="list"></div></section>
+
+<section id="dues"><div class="card" id="duel"></div></section>
+<section id="set"><div class="card"><b>Google Sheet sync</b><br><small>Paste your Apps Script web-app URL</small>
+<input id="url" placeholder="https://script.google.com/macros/s/…/exec"><button onclick="sync()">Sync now</button><div id="st"></div>
+<button class="s" style="width:100%" onclick="exportCsv()">Export CSV</button></div></section>
+
+<nav><button class="on" onclick="tab('add',this)">Add</button><button onclick="tab('dash',this)">Dashboard</button><button onclick="tab('dues',this)">Dues</button><button onclick="tab('set',this)">Sync</button></nav>
+<script>
+const $=i=>document.getElementById(i);
+let S={expenses:[],url:''};
+// --- IndexedDB persistence (holds photos too)
+const db=new Promise(r=>{const q=indexedDB.open('exp',1);q.onupgradeneeded=()=>q.result.createObjectStore('k');q.onsuccess=()=>r(q.result)});
+async function load(){const d=await db;return new Promise(r=>{const g=d.transaction('k').objectStore('k').get('s');g.onsuccess=()=>r(g.result)})}
+async function persist(){const d=await db;d.transaction('k','readwrite').objectStore('k').put(S,'s')}
+const shrink=f=>new Promise(r=>{if(!f)return r('');const i=new Image();i.onload=()=>{const k=Math.min(1,900/Math.max(i.width,i.height)),c=document.createElement('canvas');c.width=i.width*k;c.height=i.height*k;c.getContext('2d').drawImage(i,0,0,c.width,c.height);r(c.toDataURL('image/jpeg',.7))};i.src=URL.createObjectURL(f)});
+function tab(n,b){document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==n));document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x==b));render()}
+const today=()=>new Date().toISOString().slice(0,10);
+$('split').oninput=()=>{const n=Math.max(1,+$('split').value||1)-1;const o=[...document.querySelectorAll('.nm')].map(x=>x.value);$('names').innerHTML=Array.from({length:n},(_,i)=>`<input class="nm" placeholder="Person ${i+1} name" value="${o[i]||''}">`).join('')};
+async function save(){
+ const a=+$('amt').value;if(!a||!$('to').value)return alert('Enter To and Amount');
+ const n=Math.max(1,+$('split').value||1),names=[...document.querySelectorAll('.nm')].map(x=>x.value.trim());
+ const each=a/n,shares=names.map((nm,i)=>({name:nm||'Person '+(i+1),amt:+each.toFixed(2),settled:false}));
+ S.expenses.push({id:Date.now()+''+Math.random().toString(36).slice(2,5),date:$('date').value,to:$('to').value.trim(),cat:$('cat').value.trim()||'Other',amt:a,mode:$('mode').value,split:n,shares,bill:await shrink($('pb').files[0]),item:await shrink($('pi').files[0]),upd:Date.now()});
+ await persist();['to','cat','amt','pb','pi'].forEach(i=>$(i).value='');$('split').value=1;$('split').oninput();alert('Saved ✔');
+}
+function inRange(e){const p=$('fp').value,d=$('fd').value||today();if(p=='all')return 1;if(p=='day')return e.date==d;if(p=='month')return e.date.slice(0,7)==d.slice(0,7);
+ const s=new Date(d);s.setDate(s.getDate()-((s.getDay()+6)%7));const en=new Date(s);en.setDate(s.getDate()+6);return e.date>=s.toISOString().slice(0,10)&&e.date<=en.toISOString().slice(0,10)}
+function opts(id,k,all){const el=$(id),v=el.value,u=[...new Set(S.expenses.map(e=>e[k]))].sort();el.innerHTML=`<option value="">${all}</option>`+u.map(x=>`<option>${x}</option>`).join('');el.value=v}
+const COL=['#0f766e','#f59e0b','#3b82f6','#ef4444','#8b5cf6','#10b981','#ec4899','#64748b','#eab308'];
+function render(){
+ opts('fc','cat','All categories');opts('ft','to','All recipients');opts('fm','mode','All modes');
+ $('catl').innerHTML=[...new Set(S.expenses.map(e=>e.cat))].map(x=>`<option>${x}</option>`).join('');$('tol').innerHTML=[...new Set(S.expenses.map(e=>e.to))].map(x=>`<option>${x}</option>`).join('');
+ const f=S.expenses.filter(e=>inRange(e)&&(!$('fc').value||e.cat==$('fc').value)&&(!$('ft').value||e.to==$('ft').value)&&(!$('fm').value||e.mode==$('fm').value)).sort((a,b)=>b.date.localeCompare(a.date));
+ $('tot').textContent='₹'+f.reduce((s,e)=>s+e.amt,0).toFixed(2);
+ $('list').innerHTML=f.map(e=>`<div class="it"><div><b>${e.to}</b> · ${e.cat}<small>${e.date} · ${e.mode}${e.split>1?' · split '+e.split:''}</small>${e.bill?`<img class=th src="${e.bill}">`:''}${e.item?`<img class=th src="${e.item}">`:''}</div><div>₹${e.amt}<br><button class=d onclick="del('${e.id}')">✕</button></div></div>`).join('')||'No expenses';
+ // pie: current month
+ const m=today().slice(0,7),t={};S.expenses.filter(e=>e.date.slice(0,7)==m).forEach(e=>t[e.cat]=(t[e.cat]||0)+e.amt);
+ const c=$('pie').getContext('2d'),T=Object.values(t).reduce((a,b)=>a+b,0);c.clearRect(0,0,320,320);let a0=-Math.PI/2,i=0,lg='';
+ for(const[k,v]of Object.entries(t)){const a=v/T*2*Math.PI;c.beginPath();c.moveTo(160,160);c.arc(160,160,150,a0,a0+a);c.fillStyle=COL[i%9];c.fill();a0+=a;lg+=`<div><span style="color:${COL[i%9]}">●</span> ${k}: ₹${v.toFixed(0)} (${(v/T*100).toFixed(0)}%)</div>`;i++}
+ $('leg').innerHTML=lg||'No spend this month';
+ // dues
+ const d={};S.expenses.forEach(e=>e.shares.forEach(s=>{if(!s.settled)d[s.name]=(d[s.name]||0)+s.amt}));
+ const all=[...new Set(S.expenses.flatMap(e=>e.shares.map(s=>s.name)))];
+ $('duel').innerHTML='<b>Owed to you</b>'+(all.map(n=>`<div class="it"><span>${n}</span><span>₹${(d[n]||0).toFixed(2)} <button class=s onclick="settle('${n}')">Settle</button></span></div>`).join('')||'<p>No one yet</p>');
+}
+async function del(id){if(confirm('Delete?')){S.expenses=S.expenses.filter(e=>e.id!=id);S.deleted=(S.deleted||[]).concat(id);await persist();render()}}
+async function settle(n){S.expenses.forEach(e=>e.shares.forEach(s=>{if(s.name==n&&!s.settled){s.settled=true;e.upd=Date.now()}}));await persist();render()}
+// --- Google Sheet sync (photos stay on device)
+async function sync(){
+ S.url=$('url').value.trim();await persist();if(!S.url)return;$('st').textContent='Syncing…';
+ try{const strip=e=>({...e,bill:'',item:'',shares:JSON.stringify(e.shares)});
+  const r=await(await fetch(S.url)).json();
+  r.forEach(x=>{x.shares=JSON.parse(x.shares||'[]');const l=S.expenses.find(e=>e.id==x.id);if(!l&&!(S.deleted||[]).includes(x.id))S.expenses.push({...x,bill:'',item:''});else if(l&&+x.upd>l.upd)Object.assign(l,x,{bill:l.bill,item:l.item})});
+  await persist();
+  await fetch(S.url,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(S.expenses.map(strip))});
+  $('st').textContent='Synced ✔ '+new Date().toLocaleTimeString();render()}catch(e){$('st').textContent='Error: '+e.message}
+}
+function exportCsv(){const h='Date,To,Category,Amount,Mode,Split\n'+S.expenses.map(e=>[e.date,e.to,e.cat,e.amt,e.mode,e.split].join(',')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([h]));a.download='expenses.csv';a.click()}
+(async()=>{S=(await load())||S;$('date').value=today();$('fd').value=today();$('url').value=S.url||'';render();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js')})();
+</script></body></html>
